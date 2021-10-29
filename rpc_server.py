@@ -4,6 +4,7 @@ import pika
 import mysql.connector
 from mysql.connector import errorcode
 from dotenv import dotenv_values
+from datetime import date, datetime
 
 cfg = dotenv_values(".env")
 
@@ -34,6 +35,14 @@ def query_database(query, one=False):
     return (r[0] if r else None) if one else r
 
 
+def json_serial(obj):
+    """JSON serializer for objects not serializable by default json code"""
+
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    raise TypeError ("Type %s not serializable" % type(obj))
+
+
 connection = pika.BlockingConnection(pika.URLParameters('amqp://test:test@10.10.5.32/%2F'))
 
 channel = connection.channel()
@@ -46,7 +55,7 @@ def on_request(ch, method, props, body):
 
     print(" [.] Received query: %s" % query)
     my_query = query_database(query)
-    json_output = json.dumps(my_query)
+    json_output = json.dumps(my_query, default=json_serial)
 
     ch.basic_publish(exchange='',
                      routing_key=props.reply_to,
