@@ -30,8 +30,7 @@ def query_database(query, one=False):
     ##result = ''.join(result_list)
     ##return result
 
-    r = [dict((cursor.description[i][0], value) \
-              for i, value in enumerate(row)) for row in cursor.fetchall()]
+    r = [dict((cursor.description[i][0], value) for i, value in enumerate(row)) for row in cursor.fetchall()]
     return (r[0] if r else None) if one else r
 
 
@@ -46,7 +45,7 @@ def on_request(ch, method, props, body):
     query = body.decode("utf-8")
 
     print(" [.] Received query: %s" % query)
-    my_query = query_database(query, one=True)
+    my_query = query_database(query)
     json_output = json.dumps(my_query)
 
     ch.basic_publish(exchange='',
