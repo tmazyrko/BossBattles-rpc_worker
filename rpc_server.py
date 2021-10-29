@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import json
 import pika
 import mysql.connector
 from mysql.connector import errorcode
@@ -19,15 +20,19 @@ except mysql.connector.Error as err:
         print(err)
 
 
-def query_database(query):
+def query_database(query, one=False):
     cursor = sqlconn.cursor()
     cursor.execute(query)
 
-    result_list = []
-    for row in cursor:
-        result_list.append(str(row))
-    result = ''.join(result_list)
-    return result
+    ##result_list = []
+    ##for row in cursor:
+    ##    result_list.append(str(row))
+    ##result = ''.join(result_list)
+    ##return result
+
+    r = [dict((cursor.description[i][0], value) \
+              for i, value in enumerate(row)) for row in cursor.fetchall()]
+    return (r[0] if r else None) if one else r
 
 
 connection = pika.BlockingConnection(pika.URLParameters('amqp://test:test@10.10.5.32/%2F'))
@@ -41,12 +46,13 @@ def on_request(ch, method, props, body):
     query = body.decode("utf-8")
 
     print(" [.] Received query: %s" % query)
-    response = query_database(query)
+    my_query = query_database(query, one=True)
+    json_output = json.dumps(my_query)
 
     ch.basic_publish(exchange='',
                      routing_key=props.reply_to,
                      properties=pika.BasicProperties(correlation_id=props.correlation_id),
-                     body=str(response))
+                     body=str(json_output))
     ch.basic_ack(delivery_tag=method.delivery_tag)
 
 
