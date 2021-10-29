@@ -6,8 +6,8 @@ from mysql.connector import errorcode
 from dotenv import dotenv_values
 from datetime import date, datetime
 
+# Connect to MySQL database using config provided by .env file
 cfg = dotenv_values(".env")
-
 try:
     sqlconn = mysql.connector.connect(user=cfg['MYSQL_USER'], password=cfg['MYSQL_PASS'],
                                       host=cfg['MYSQL_IP'],
@@ -22,14 +22,9 @@ except mysql.connector.Error as err:
 
 
 def query_database(query, one=False):
+    """Queries database and returns the result in a format that can be dumped to JSON"""
     cursor = sqlconn.cursor()
     cursor.execute(query)
-
-    ##result_list = []
-    ##for row in cursor:
-    ##    result_list.append(str(row))
-    ##result = ''.join(result_list)
-    ##return result
 
     r = [dict((cursor.description[i][0], value) for i, value in enumerate(row)) for row in cursor.fetchall()]
     return (r[0] if r else None) if one else r
@@ -40,23 +35,24 @@ def json_serial(obj):
 
     if isinstance(obj, (datetime, date)):
         return obj.isoformat()
-    raise TypeError ("Type %s not serializable" % type(obj))
+    raise TypeError("Type %s not serializable" % type(obj))
 
 
+# Establish AMQP connection to RabbitMQ broker
 connection = pika.BlockingConnection(pika.URLParameters('amqp://test:test@10.10.5.32/%2F'))
-
 channel = connection.channel()
-
 channel.queue_declare(queue='sqlQueue')
 
 
 def on_request(ch, method, props, body):
+    """Function executes upon consuming an RPC call via RabbitMQ"""
     query = body.decode("utf-8")
 
     print(" [.] Received query: %s" % query)
     my_query = query_database(query)
-    json_output = json.dumps(my_query, default=json_serial)
+    json_output = json.dumps(my_query, default=json_serial)  # Dumps db query result to a JSON string
 
+    # Send RPC reply message back to the server
     ch.basic_publish(exchange='',
                      routing_key=props.reply_to,
                      properties=pika.BasicProperties(correlation_id=props.correlation_id),
@@ -65,7 +61,7 @@ def on_request(ch, method, props, body):
 
 
 channel.basic_qos(prefetch_count=1)
-channel.basic_consume(queue='sqlQueue', on_message_callback=on_request)
+channel.basic_consume(queue='sqlQueue', on_message_callback=on_request)  # Defines RabbitMQ queue to listen on
 
 print(" [x] Awaiting RPC requests")
 channel.start_consuming()
