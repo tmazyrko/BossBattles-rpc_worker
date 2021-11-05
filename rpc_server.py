@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import pika
+import json
+import ast
 import mysql.connector
 from mysql.connector import errorcode
 from dotenv import dotenv_values
@@ -20,14 +22,43 @@ except mysql.connector.Error as err:
 
 
 def query_database(query):
-    cursor = sqlconn.cursor()
-    cursor.execute(query)
-
+    cursor = sqlconn.cursor(dictionary=True)
     result_list = []
-    for row in cursor:
-        result_list.append(str(row))
-    result = ''.join(result_list)
-    return result
+    try:
+        cursor.execute(query)
+        for row in cursor:
+            result_list.append(str(row))
+        #result_list = str(cursor.fetchall())
+        #print(str(result_list))
+        sqlconn.commit()
+    except mysql.connector.Error as e:
+        try:
+            result = " [!] MySQL Error [%d]: %s" % (e.args[0], e.args[1])
+            print(result)
+            return result
+        except IndexError:
+            result = " [!] MySQL Error: %s" % str(e)
+            print(result)
+            return result
+    except TypeError as e:
+        result = " [!] TypeError: %s" % str(e)
+        print(result)
+        return result
+    except ValueError as e:
+        result = " [!] ValueError: %s" % str(e)
+        print(result)
+        return result
+
+    try:
+        result = ''.join(result_list)
+        #print(result)
+        result = json.dumps(ast.literal_eval(result))
+        #print(result)
+        return result
+    except SyntaxError as e:
+        error_msg = " [!] SyntaxError: %s. This is most likely not a problem, especially if it happens after an INSERT query." % str(e)
+        print(error_msg)
+        return str([])
 
 
 connection = pika.BlockingConnection(pika.URLParameters('amqp://test:test@10.10.5.32/%2F'))
@@ -46,7 +77,7 @@ def on_request(ch, method, props, body):
     ch.basic_publish(exchange='',
                      routing_key=props.reply_to,
                      properties=pika.BasicProperties(correlation_id=props.correlation_id),
-                     body=str(response))
+                     body=response)
     ch.basic_ack(delivery_tag=method.delivery_tag)
 
 
