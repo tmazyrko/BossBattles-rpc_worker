@@ -5,8 +5,11 @@ import ast
 import mysql.connector
 from mysql.connector import errorcode
 from dotenv import dotenv_values
+from log import Log
 
 cfg = dotenv_values(".env")
+
+logger = Log(cfg['AMQP_URL'], "INFO")
 
 try:
     sqlconn = mysql.connector.connect(user=cfg['MYSQL_USER'], password=cfg['MYSQL_PASS'],
@@ -14,11 +17,11 @@ try:
                                       database=cfg['DB_NAME'])
 except mysql.connector.Error as err:
     if err.errno == errorcode.ER_ACCESS_DENIED_ERROR:
-        print("Something is wrong with your user name or password")
+        logger.error("MySQL Connector: Wrong username or password.")
     elif err.errno == errorcode.ER_BAD_DB_ERROR:
-        print("Database does not exist")
+        logger.error("MySQL Connector: Database does not exist.")
     else:
-        print(err)
+        logger.error("MySQL Connector: " + str(err))
 
 
 def query_database(query):
@@ -28,36 +31,27 @@ def query_database(query):
         cursor.execute(query)
         for row in cursor:
             result_list.append(str(row))
-        #result_list = str(cursor.fetchall())
-        #print(str(result_list))
         sqlconn.commit()
     except mysql.connector.Error as e:
         try:
-            result = " [!] MySQL Error [%d]: %s" % (e.args[0], e.args[1])
-            print(result)
-            return result
+            logger.error("MySQL Error [%d]: %s" % (e.args[0], e.args[1]))
+            return str([])
         except IndexError:
-            result = " [!] MySQL Error: %s" % str(e)
-            print(result)
-            return result
+            logger.error("MySQL Error: %s" % str(e))
+            return str([])
     except TypeError as e:
-        result = " [!] TypeError: %s" % str(e)
-        print(result)
-        return result
+        logger.error("TypeError: %s" % str(e))
+        return str([])
     except ValueError as e:
-        result = " [!] ValueError: %s" % str(e)
-        print(result)
-        return result
+        logger.error("ValueError: %s" % str(e))
+        return str([])
 
     try:
         result = ''.join(result_list)
-        #print(result)
         result = json.dumps(ast.literal_eval(result))
-        #print(result)
         return result
     except SyntaxError as e:
-        error_msg = " [!] SyntaxError: %s. This is most likely not a problem, especially if it happens after an INSERT query." % str(e)
-        print(error_msg)
+        logger.warn("SyntaxError: %s. This is most likely not a problem if it happens after an INSERT query." % str(e))
         return str([])
 
 
@@ -71,7 +65,7 @@ channel.queue_declare(queue='sqlQueue')
 def on_request(ch, method, props, body):
     query = body.decode("utf-8")
 
-    print(" [.] Received query: %s" % query)
+    logger.info("Received query %s" % query)
     response = query_database(query)
 
     ch.basic_publish(exchange='',
@@ -84,5 +78,5 @@ def on_request(ch, method, props, body):
 channel.basic_qos(prefetch_count=1)
 channel.basic_consume(queue='sqlQueue', on_message_callback=on_request)
 
-print(" [x] Awaiting RPC requests")
+logger.log("Awaiting RPC requests.")
 channel.start_consuming()
