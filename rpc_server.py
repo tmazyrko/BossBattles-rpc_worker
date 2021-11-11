@@ -6,11 +6,21 @@ import mysql.connector
 from mysql.connector import errorcode
 from dotenv import dotenv_values
 from log import Log
+import signal
+import sys
+
+
+def signal_handler(signal, frame):  # Graceful CTRL+C handler
+    logger.log("Exiting rpc_server.py", "WARN")
+    sys.exit(0)
+
+
+signal.signal(signal.SIGINT, signal_handler)
 
 cfg = dotenv_values(".env")
-
 logger = Log(cfg['AMQP_URL'], "INFO")
 
+# Sets up MySQL Connection
 try:
     sqlconn = mysql.connector.connect(user=cfg['MYSQL_USER'], password=cfg['MYSQL_PASS'],
                                       host=cfg['MYSQL_IP'],
@@ -23,8 +33,26 @@ except mysql.connector.Error as err:
     else:
         logger.error("MySQL Connector: " + str(err))
 
+# Sets up RabbitMQ connection
+connection = pika.BlockingConnection(pika.URLParameters(cfg['AMQP_URL']))
+channel = connection.channel()
+channel.queue_declare(queue='sqlQueue')
 
-def query_database(query):
+
+def on_request(ch, method, props, body):  # Executes upon consuming an AMQP message
+    query = body.decode("utf-8")
+
+    logger.info("Received query %s" % query)
+    response = query_database(query)
+
+    ch.basic_publish(exchange='',
+                     routing_key=props.reply_to,
+                     properties=pika.BasicProperties(correlation_id=props.correlation_id),
+                     body=response)
+    ch.basic_ack(delivery_tag=method.delivery_tag)
+
+
+def query_database(query):  # Queries the database and returns a result
     cursor = sqlconn.cursor(dictionary=True)
     result_list = []
     try:
@@ -53,26 +81,6 @@ def query_database(query):
     except SyntaxError as e:
         logger.warn("SyntaxError: %s. This is most likely not a problem if it happens after an INSERT query." % str(e))
         return str([])
-
-
-connection = pika.BlockingConnection(pika.URLParameters(cfg['AMQP_URL']))
-
-channel = connection.channel()
-
-channel.queue_declare(queue='sqlQueue')
-
-
-def on_request(ch, method, props, body):
-    query = body.decode("utf-8")
-
-    logger.info("Received query %s" % query)
-    response = query_database(query)
-
-    ch.basic_publish(exchange='',
-                     routing_key=props.reply_to,
-                     properties=pika.BasicProperties(correlation_id=props.correlation_id),
-                     body=response)
-    ch.basic_ack(delivery_tag=method.delivery_tag)
 
 
 channel.basic_qos(prefetch_count=1)
