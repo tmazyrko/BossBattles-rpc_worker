@@ -61,7 +61,7 @@ def query_database(query):
         return str([])
 
 
-connection = pika.BlockingConnection(pika.URLParameters('amqp://test:test@10.10.5.32/%2F'))
+connection = pika.BlockingConnection(pika.URLParameters(cfg['AMQP_URL']))
 
 channel = connection.channel()
 
